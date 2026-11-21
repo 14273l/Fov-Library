@@ -1,0 +1,37 @@
+local LIBRARY_URL = "https://raw.githubusercontent.com/14273l/Fov-Library/refs/heads/main/Fov%20library"
+assert(type(loadstring) == "function", "This example requires loadstring support")
+local source = game:HttpGet(LIBRARY_URL)
+local chunk, compileError = loadstring(source, "FovLibrary")
+assert(chunk, compileError)
+local FOV = chunk()
+
+local circle = FOV.new({
+	Name = "FovExample",
+	Radius = 125, -- 250px diameter.
+	Visible = true,
+	FollowMouse = true,
+	Color = Color3.fromRGB(255, 255, 255),
+	Thickness = 1,
+	Outline = true,
+	Filled = true,
+	FillTransparency = 0.8,
+	Shadow = true,
+	ShadowColor = Color3.fromRGB(169, 150, 249),
+	ShadowBlurRadius = UDim.new(0, 20),
+	ShadowTransparency = 0.5,
+	ShadowShowBehindParent = false,
+})
+
+-- Uncomment the controls you want to try:
+-- circle:SetRadius(180)
+-- circle:SetColor(Color3.fromRGB(169, 150, 249))
+-- circle:Update({ Filled = false, Thickness = 2, Shadow = false })
+-- circle:SetPosition(Vector2.new(400, 300)) -- Fixed position; stops tracking.
+-- circle:Center() -- Follow the viewport center instead of the mouse.
+-- circle:SetFollowMouse(true)
+-- circle:SetVisible(false)
+-- circle:SetVisible(true)
+-- print(circle:ContainsPoint(Vector2.new(400, 300)))
+-- circle:Destroy() -- Remove the overlay and disconnect tracking.
+
+return circle
