@@ -1,0 +1,356 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+
+local FovLibrary = {}
+local Circle = {}
+Circle.__index = Circle
+
+local DEFAULTS = {
+	Name = "Fov",
+	DisplayOrder = 100,
+	Radius = 125,
+	Visible = true,
+	FollowMouse = true,
+	Color = Color3.fromRGB(255, 255, 255),
+	Transparency = 0,
+	Thickness = 1,
+	Outline = true,
+	OutlineColor = Color3.fromRGB(0, 0, 0),
+	OutlineTransparency = 0,
+	Filled = true,
+	FillColor = Color3.fromRGB(255, 255, 255),
+	FillTransparency = 0.8,
+	Gradient = true,
+	GradientColor = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(143, 135, 255)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 0, 0)),
+	}),
+	GradientRotation = -90,
+	Shadow = true,
+	ShadowColor = Color3.fromRGB(169, 150, 249),
+	ShadowTransparency = 0.5,
+	ShadowBlurRadius = UDim.new(0, 20),
+	ShadowOffset = UDim2.fromOffset(0, 0),
+	ShadowSpread = UDim2.fromOffset(0, 0),
+	ShadowShowBehindParent = false,
+}
+
+local function isFinite(value)
+	return type(value) == "number" and value == value and math.abs(value) < math.huge
+end
+
+local function isNonNegative(value)
+	return isFinite(value) and value >= 0
+end
+
+local function isTransparency(value)
+	return isFinite(value) and value >= 0 and value <= 1
+end
+
+local function isBoolean(value)
+	return type(value) == "boolean"
+end
+
+local function isColor(value)
+	return typeof(value) == "Color3"
+end
+
+local function isUDim2(value)
+	return typeof(value) == "UDim2"
+		and isFinite(value.X.Scale) and isFinite(value.X.Offset)
+		and isFinite(value.Y.Scale) and isFinite(value.Y.Offset)
+end
+
+local VALIDATORS = {
+	Name = function(value)
+		return type(value) == "string" and #value > 0
+	end,
+	Parent = function(value)
+		return typeof(value) == "Instance"
+	end,
+	DisplayOrder = function(value)
+		return isFinite(value) and value % 1 == 0
+	end,
+	Position = function(value)
+		return typeof(value) == "Vector2" and isFinite(value.X) and isFinite(value.Y)
+	end,
+	Radius = isNonNegative,
+	Visible = isBoolean,
+	FollowMouse = isBoolean,
+	Color = isColor,
+	Transparency = isTransparency,
+	Thickness = isNonNegative,
+	Outline = isBoolean,
+	OutlineColor = isColor,
+	OutlineTransparency = isTransparency,
+	Filled = isBoolean,
+	FillColor = isColor,
+	FillTransparency = isTransparency,
+	Gradient = isBoolean,
+	GradientColor = function(value)
+		return typeof(value) == "ColorSequence"
+	end,
+	GradientRotation = isFinite,
+	Shadow = isBoolean,
+	ShadowColor = isColor,
+	ShadowTransparency = isTransparency,
+	ShadowBlurRadius = function(value)
+		return typeof(value) == "UDim" and isNonNegative(value.Scale) and isNonNegative(value.Offset)
+	end,
+	ShadowOffset = isUDim2,
+	ShadowSpread = isUDim2,
+	ShadowShowBehindParent = isBoolean,
+}
+
+local function mergeOptions(current, changes)
+	assert(type(changes) == "table", "FovLibrary: options must be a table")
+	local result = table.clone(current)
+	for key, value in pairs(changes) do
+		local validator = VALIDATORS[key]
+		assert(validator, "FovLibrary: unknown option " .. tostring(key))
+		assert(validator(value), "FovLibrary: invalid value for " .. tostring(key))
+		result[key] = value
+	end
+	-- Supplying a fixed position implicitly stops tracking unless explicitly overridden.
+	if changes.Position ~= nil and changes.FollowMouse == nil then
+		result.FollowMouse = false
+	end
+	return result
+end
+
+local function roundedFrame(name, parent)
+	local frame = Instance.new("Frame")
+	frame.Name = name
+	frame.BorderSizePixel = 0
+	frame.BackgroundTransparency = 1
+	frame.AnchorPoint = Vector2.new(0.5, 0.5)
+	frame.Position = UDim2.fromScale(0.5, 0.5)
+	frame.Size = UDim2.fromScale(1, 1)
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0.5, 0)
+	corner.Parent = frame
+	frame.Parent = parent
+	return frame
+end
+
+function Circle:_assertAlive()
+	assert(not self._destroyed, "FovLibrary: circle has been destroyed")
+end
+
+function Circle:_resolvePosition()
+	if self._options.FollowMouse then
+		return UserInputService:GetMouseLocation()
+	end
+	if self._options.Position ~= nil then
+		return self._options.Position
+	end
+	local camera = workspace.CurrentCamera
+	return (camera and camera.ViewportSize or self.Gui.AbsoluteSize) * 0.5
+end
+
+function Circle:_updatePosition()
+	local position = self:_resolvePosition()
+	if position ~= self._position then
+		self._position = position
+		self.Frame.Position = UDim2.fromOffset(position.X, position.Y)
+	end
+end
+
+function Circle:_syncTracking()
+	local options = self._options
+	local needsTracking = options.Visible and options.Radius > 0
+		and (options.FollowMouse or options.Position == nil)
+	if needsTracking and not self._connection then
+		self._connection = RunService.RenderStepped:Connect(function()
+			self:_updatePosition()
+		end)
+	elseif not needsTracking and self._connection then
+		self._connection:Disconnect()
+		self._connection = nil
+	end
+end
+
+function Circle:_apply()
+	local options = self._options
+	self.Gui.Name = options.Name
+	self.Gui.DisplayOrder = options.DisplayOrder
+	self.Gui.Enabled = options.Visible
+	self.Frame.Size = UDim2.fromOffset(options.Radius * 2, options.Radius * 2)
+	self.Frame.Visible = options.Radius > 0
+	self.Fill.Visible = options.Filled
+	self.Fill.BackgroundColor3 = options.FillColor
+	self.Fill.BackgroundTransparency = options.FillTransparency
+	self.Gradient.Enabled = options.Gradient
+	self.Gradient.Color = options.GradientColor
+	self.Gradient.Rotation = options.GradientRotation
+	if self.Shadow then
+		self.Shadow.Enabled = options.Shadow
+		self.Shadow.Color = options.ShadowColor
+		self.Shadow.Transparency = options.ShadowTransparency
+		self.Shadow.BlurRadius = options.ShadowBlurRadius
+		self.Shadow.Offset = options.ShadowOffset
+		self.Shadow.Spread = options.ShadowSpread
+		self.Shadow.ShowBehindParent = options.ShadowShowBehindParent
+	end
+
+	-- Separate concentric frames avoid requiring UIStroke.BorderOffset.
+	for index, ring in ipairs(self._rings) do
+		local isColorRing = index == 2
+		local offset = options.Outline and (index - 1) * options.Thickness or 0
+		ring.Frame.Size = UDim2.new(1, offset * 2, 1, offset * 2)
+		ring.Frame.Visible = options.Thickness > 0 and (isColorRing or options.Outline)
+		ring.Stroke.Thickness = options.Thickness
+		ring.Stroke.Color = isColorRing and options.Color or options.OutlineColor
+		ring.Stroke.Transparency = isColorRing and options.Transparency or options.OutlineTransparency
+	end
+
+	self.Gui.Parent = options.Parent
+	self:_updatePosition()
+	self:_syncTracking()
+end
+
+function FovLibrary.new(options)
+	assert(RunService:IsClient(), "FovLibrary must be used on the client")
+	if options == nil then
+		options = {}
+	end
+	local settings = mergeOptions(DEFAULTS, options)
+	if not settings.Parent then
+		local player = Players.LocalPlayer
+		assert(player, "FovLibrary: LocalPlayer is unavailable")
+		settings.Parent = player:WaitForChild("PlayerGui")
+	end
+
+	local gui = Instance.new("ScreenGui")
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.ScreenInsets = Enum.ScreenInsets.None
+	gui.ClipToDeviceSafeArea = false
+	gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	local frame = roundedFrame("FovBase_Frame", gui)
+	local fill = roundedFrame("FovFill_Frame", frame)
+	local gradient = Instance.new("UIGradient")
+	gradient.Parent = fill
+	-- UIShadow is optional so the overlay still loads on clients without this class.
+	local shadowSupported, shadow = pcall(Instance.new, "UIShadow")
+	if shadowSupported then
+		shadow.Name = "UIShadow"
+		shadow.Parent = fill
+	else
+		shadow = nil
+	end
+	local rings = {}
+	for _, name in ipairs({ "InnerOutline", "ColorRing", "OuterOutline" }) do
+		local ring = roundedFrame(name, frame)
+		ring.ZIndex = 2
+		local stroke = Instance.new("UIStroke")
+		stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		stroke.Parent = ring
+		table.insert(rings, { Frame = ring, Stroke = stroke })
+	end
+
+	local self = setmetatable({
+		Gui = gui,
+		Frame = frame,
+		Fill = fill,
+		Gradient = gradient,
+		Shadow = shadow,
+		_options = settings,
+		_rings = rings,
+		_destroyed = false,
+	}, Circle)
+	self._destroyConnection = gui.Destroying:Connect(function()
+		self:Destroy()
+	end)
+	-- Clean up partial construction if Roblox rejects a property or parent assignment.
+	local ok, err = pcall(function()
+		self:_apply()
+	end)
+	if not ok then
+		self:Destroy()
+		error(err, 2)
+	end
+	return self
+end
+
+function Circle:Update(options)
+	self:_assertAlive()
+	local previous = self._options
+	self._options = mergeOptions(previous, options)
+	local ok, err = pcall(function()
+		self:_apply()
+	end)
+	if not ok then
+		self._options = previous
+		self:_apply()
+		error(err, 2)
+	end
+	return self
+end
+
+function Circle:SetRadius(radius)
+	return self:Update({ Radius = radius })
+end
+
+function Circle:SetVisible(visible)
+	return self:Update({ Visible = visible })
+end
+
+function Circle:SetFollowMouse(enabled)
+	return self:Update({ FollowMouse = enabled })
+end
+
+function Circle:SetPosition(position)
+	return self:Update({ Position = position, FollowMouse = false })
+end
+
+function Circle:SetColor(color)
+	return self:Update({ Color = color })
+end
+
+function Circle:SetFilled(filled)
+	return self:Update({ Filled = filled })
+end
+
+function Circle:Center()
+	self:_assertAlive()
+	self._options.Position = nil
+	self._options.FollowMouse = false
+	self:_apply()
+	return self
+end
+
+function Circle:GetPosition()
+	self:_assertAlive()
+	return self:_resolvePosition()
+end
+
+function Circle:GetOptions()
+	self:_assertAlive()
+	return table.clone(self._options)
+end
+
+function Circle:ContainsPoint(point)
+	self:_assertAlive()
+	assert(VALIDATORS.Position(point), "FovLibrary: point must be a finite Vector2")
+	return (point - self:GetPosition()).Magnitude <= self._options.Radius
+end
+
+function Circle:Destroy()
+	if self._destroyed then
+		return
+	end
+	self._destroyed = true
+	if self._connection then
+		self._connection:Disconnect()
+		self._connection = nil
+	end
+	if self._destroyConnection then
+		self._destroyConnection:Disconnect()
+		self._destroyConnection = nil
+	end
+	self.Gui:Destroy()
+end
+
+return FovLibrary
